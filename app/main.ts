@@ -34,9 +34,13 @@ const server = net.createServer((socket) => {
         const responseBuilder = new HttpResponseBuilder();
 
         const acceptEncoding = headersMap.get('Accept-Encoding');
-        if (acceptEncoding && supportedCompressions.includes(acceptEncoding)) {
-            responseBuilder
-                .addHeader('Content-Encoding', acceptEncoding)
+        if (acceptEncoding) {
+            const acceptEncodingList = acceptEncoding.split(',').map(i => i.trim());
+            const supportedCompressionsList = supportedCompressions.filter(i => acceptEncodingList.includes(i));
+            if (supportedCompressionsList.length > 0) {
+                responseBuilder
+                    .addHeader('Content-Encoding', supportedCompressionsList[0])
+            }
         }
 
         switch (true) {
