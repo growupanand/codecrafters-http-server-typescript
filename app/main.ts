@@ -1,6 +1,6 @@
 import * as net from 'net';
 import fs from "node:fs";
-
+import zlib from 'node:zlib';
 
 const supportedCompressions = ['gzip'];
 
@@ -33,15 +33,7 @@ const server = net.createServer((socket) => {
 
         const responseBuilder = new HttpResponseBuilder();
 
-        const acceptEncoding = headersMap.get('Accept-Encoding');
-        if (acceptEncoding) {
-            const acceptEncodingList = acceptEncoding.split(',').map(i => i.trim());
-            const supportedCompressionsList = supportedCompressions.filter(i => acceptEncodingList.includes(i));
-            if (supportedCompressionsList.length > 0) {
-                responseBuilder
-                    .addHeader('Content-Encoding', supportedCompressionsList[0])
-            }
-        }
+
 
         switch (true) {
             case path === "/":
@@ -111,8 +103,19 @@ const server = net.createServer((socket) => {
         }
 
 
-        socket.write(responseBuilder.build());
-        socket.end(); 
+        const acceptEncoding = headersMap.get('Accept-Encoding');
+        if (acceptEncoding) {
+            const acceptEncodingList = acceptEncoding.split(',').map(i => i.trim());
+            const supportedCompressionsList = supportedCompressions.filter(i => acceptEncodingList.includes(i));
+            if (supportedCompressionsList.length > 0) {
+                responseBuilder
+                    .addHeader('Content-Encoding', supportedCompressionsList[0])
+            }
+        }
+
+
+        responseBuilder.send(socket);
+        
     })
 });
 
@@ -145,10 +148,34 @@ class HttpResponseBuilder {
         return this;
     }
 
-    build() {
-        const headers = Array.from(this.headersMap.entries()).map(([key, value]) => `${key}: ${value}`).join('\r\n');
-        return `HTTP/1.1 ${this.statusCode} ${this.statusText}\r\n${headers}\r\n\r\n${this.body}`;
+    getHeadersString() {
+        return Array.from(this.headersMap.entries()).map(([key, value]) => `${key}: ${value}`).join('\r\n');
     }
+
+    send(socket: net.Socket) {
+        let responseBody: string | Buffer = this.body;
+
+        if (this.headersMap.has('Content-Encoding')) {
+            const contentEncoding = this.headersMap.get('Content-Encoding');
+            if (contentEncoding === 'gzip') {
+                const buffer = Buffer.from(responseBody, 'utf8');
+                responseBody = zlib.gzipSync(buffer);
+                console.log({responseBody})
+                this.addHeader('Content-Length', responseBody.length.toString());
+                socket.write(`HTTP/1.1 ${this.statusCode} ${this.statusText}\r\n${this.getHeadersString()}\r\n\r\n`);
+                socket.write(responseBody);
+                socket.end();
+
+                return;
+            }
+        }
+
+
+        this.addHeader('Content-Length', responseBody.length.toString());
+        socket.write(`HTTP/1.1 ${this.statusCode} ${this.statusText}\r\n${this.getHeadersString()}\r\n\r\n${responseBody}`);
+        socket.end();
+    }
+        
 }
 
 
