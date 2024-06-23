@@ -2,11 +2,16 @@ import * as net from 'net';
 import fs from "node:fs";
 
 
+const supportedCompressions = ['gzip'];
+
 
 const processArgs = process.argv.splice(2);
 
 const directoryArgIndex = processArgs.findIndex(arg => arg.startsWith('--directory'));
 const directoryArgValue = directoryArgIndex !== -1 ? processArgs[directoryArgIndex + 1] : undefined;
+
+
+
 
 const server = net.createServer((socket) => {
 
@@ -24,28 +29,43 @@ const server = net.createServer((socket) => {
         });
         const headersMap = new Map(headersKeyValueArray);
 
-        
-        let response = 'HTTP/1.1 404 Not Found\r\n\r\n';
+
+
+        const responseBuilder = new HttpResponseBuilder();
+
+        const acceptEncoding = headersMap.get('Accept-Encoding');
+        if (acceptEncoding && supportedCompressions.includes(acceptEncoding)) {
+            responseBuilder
+                .addHeader('Content-Encoding', acceptEncoding)
+        }
+
         switch (true) {
             case path === "/":
-                response = 'HTTP/1.1 200 OK\r\n\r\n';
+                responseBuilder.setStatusCode(200);
                 break;
 
             // Example: "GET /echo/abc HTTP/1.1\r\nHost: localhost:4221\r\nUser-Agent: curl/7.64.1\r\nAccept: */*\r\n\r\n"
             case path.startsWith("/echo/"):
                 const echoPathQuery = path.split("/echo/")[1];
-                response = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${echoPathQuery.length}\r\n\r\n${echoPathQuery}`;
+                responseBuilder
+                    .setStatusCode(200)
+                    .addHeader('Content-Type', 'text/plain')
+                    .addHeader('Content-Length', echoPathQuery.length.toString())
+                    .setBody(echoPathQuery);
                 break;
 
             case path === '/user-agent':
-                console.log({headersMap, path});
                 const userAgent = headersMap.get('User-Agent');
                 if (!userAgent) {
-                    response = 'HTTP/1.1 400 Bad Request\r\n\r\n';
+                    responseBuilder.setStatusCode(400);
                     break;
                 }
 
-                response = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${userAgent.length}\r\n\r\n${userAgent}`;
+                responseBuilder
+                    .setStatusCode(200)
+                    .addHeader('Content-Type', 'text/plain')
+                    .addHeader('Content-Length', userAgent.length.toString())
+                    .setBody(userAgent);
                 break;
 
             case path.startsWith("/files/"):
@@ -55,28 +75,80 @@ const server = net.createServer((socket) => {
                 if (method === "GET") {
                     try {
                         const fileContent = fs.readFileSync(filePath);
-                        response = `HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ${fileContent.length}\r\n\r\n${fileContent}`;
-                    } catch (error) {}
+                        responseBuilder
+                            .setStatusCode(200)
+                            .addHeader('Content-Type', 'application/octet-stream')
+                            .addHeader('Content-Length', fileContent.length.toString())
+                            .setBody(fileContent.toString());
+                    } catch (error) {
+                        responseBuilder.setStatusCode(404);
+                        responseBuilder.setStatusText('Not Found');
+                    }
                 }
                 
                 if (method === "POST" && requestBody !== undefined) {
                     try {
                         // Create new file with content of request body
                         fs.writeFileSync(filePath, requestBody);
-                        response = 'HTTP/1.1 201 Created\r\n\r\n';
-                    } catch (error) {}
+                        responseBuilder.setStatusCode(201);
+                        responseBuilder.setStatusText('Created');
+                    } catch (error) {
+                        responseBuilder.setStatusCode(404);
+                        responseBuilder.setStatusText('Not Found');
+                    }
                 }
 
                 break;
 
             default:
+                responseBuilder.setStatusCode(404);
+                responseBuilder.setStatusText('Not Found');
                 break;
         }
 
-        socket.write(response);
+
+        socket.write(responseBuilder.build());
         socket.end(); 
     })
 });
+
+
+
+
+class HttpResponseBuilder {
+    private statusCode: number = 200;
+    private statusText: string = 'OK';
+    private headersMap: Map<string, string> = new Map();
+    private body: string = '';
+
+    setStatusCode(statusCode: number) {
+        this.statusCode = statusCode;
+        return this;
+    }
+
+    setStatusText(statusText: string) {
+        this.statusText = statusText;
+        return this;
+    }
+
+    addHeader(key: string, value: string) {
+        this.headersMap.set(key, value);
+        return this;
+    }
+
+    setBody(body: string) {
+        this.body = body;
+        return this;
+    }
+
+    build() {
+        const headers = Array.from(this.headersMap.entries()).map(([key, value]) => `${key}: ${value}`).join('\r\n');
+        return `HTTP/1.1 ${this.statusCode} ${this.statusText}\r\n${headers}\r\n\r\n${this.body}`;
+    }
+}
+
+
+
 
 // You can use print statements as follows for debugging, they'll be visible when running tests.
 console.log("Logs from your program will appear here!");
@@ -85,3 +157,4 @@ console.log("Logs from your program will appear here!");
 server.listen(4221, 'localhost', () => {
     console.log('Server is running on port 4221');
 });
+
