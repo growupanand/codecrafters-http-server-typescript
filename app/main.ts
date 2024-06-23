@@ -10,9 +10,15 @@ const server = net.createServer((socket) => {
 
         let response;
 
+        const echoPath = '/echo';
+        const echoPathQuery = path.split(echoPath + "/")[1];
+
         switch (path) {
             case "/":
                 response = 'HTTP/1.1 200 OK\r\n\r\n';
+                break;
+            case `${echoPath}/${echoPathQuery}`:
+                response = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${echoPathQuery.length}\r\n\r\n${echoPathQuery}`;
                 break;
             default:
                 response = 'HTTP/1.1 404 Not Found\r\n\r\n';
